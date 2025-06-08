@@ -171,7 +171,7 @@ class FileOrganizer:
         print("Based on content analysis, the following organization is suggested:\n")
         
         for folder_name, files in proposal.items():
-            print(f"  📁 {folder_name}: {len(files)} files")
+            print(f"  {folder_name}: {len(files)} files")
             
         print(f"\nTotal categories proposed: {len(proposal)}")
         print(f"Total files to organize: {sum(len(files) for files in proposal.values())}")
@@ -210,8 +210,8 @@ class FileOrganizer:
         for folder_name, files in proposal.items():
             target_folder = organized_directory / folder_name
             
-            print(f"\n📁 Organizing: {folder_name}")
-            print(f"   Files to process: {len(files)}")
+            print(f"\nOrganizing: {folder_name}")
+            print(f"  Files to process: {len(files)}")
             
             if not dry_run:
                 target_folder.mkdir(parents=True, exist_ok=True)
@@ -230,24 +230,24 @@ class FileOrganizer:
                         
                         shutil.move(str(file_path), str(target_path))
                         processed += 1
-                        print(f"   ✓ Moved: {file_path.name} -> {folder_name}/")
+                        print(f"  Moved: {file_path.name} -> {folder_name}/")
                         
                     except Exception as e:
-                        print(f"   ✗ Error moving {file_path.name}: {e}")
+                        print(f"  Error moving {file_path.name}: {e}")
             else:
                 for file_path, reason in files:
                     processed += 1
-                    print(f"   [DRY RUN] {file_path.name} -> {folder_name}/")
+                    print(f"  [DRY RUN] {file_path.name} -> {folder_name}/")
         
         # Summary
         if not dry_run:
-            print(f"\n🎉 Organization Complete!")
-            print(f"📊 Files organized: {processed}/{total_files}")
-            print(f"📁 Categories created: {len(proposal)}")
-            print(f"📂 Files organized in: {organized_directory}")
+            print(f"\nOrganization Complete!")
+            print(f"Files organized: {processed}/{total_files}")
+            print(f"Categories created: {len(proposal)}")
+            print(f"Files organized in: {organized_directory}")
         else:
-            print(f"\n📋 Dry run complete - no files were moved")
-            print(f"📊 Would organize: {processed} files into {len(proposal)} categories")
+            print(f"\nDry run complete - no files were moved")
+            print(f"Would organize: {processed} files into {len(proposal)} categories")
             print("Remove --dry-run flag to execute the organization")
 
 
