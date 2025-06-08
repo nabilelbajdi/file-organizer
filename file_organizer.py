@@ -14,6 +14,7 @@ Features:
 
 import os
 import json
+import shutil
 import click
 import ollama
 from pathlib import Path
@@ -191,6 +192,63 @@ class FileOrganizer:
                 return False
             else:
                 print("Please enter 'y' for yes or 'n' for no.")
+    
+    def execute_organization_plan(self, proposal: Dict[str, List[Tuple[Path, str]]], dry_run: bool = False):
+        """Execute the approved organization plan"""
+        organized_directory = self.target_directory / "organized_by_content"
+        
+        if not dry_run:
+            organized_directory.mkdir(exist_ok=True)
+        
+        print(f"\n{'='*60}")
+        print(f"EXECUTING ORGANIZATION PLAN")
+        print(f"{'='*60}")
+        
+        total_files = sum(len(files) for files in proposal.values())
+        processed = 0
+        
+        for folder_name, files in proposal.items():
+            target_folder = organized_directory / folder_name
+            
+            print(f"\n📁 Organizing: {folder_name}")
+            print(f"   Files to process: {len(files)}")
+            
+            if not dry_run:
+                target_folder.mkdir(parents=True, exist_ok=True)
+                
+                for file_path, reason in files:
+                    try:
+                        target_path = target_folder / file_path.name
+                        
+                        # Handle naming conflicts
+                        counter = 1
+                        while target_path.exists():
+                            stem = file_path.stem
+                            suffix = file_path.suffix
+                            target_path = target_folder / f"{stem}_{counter}{suffix}"
+                            counter += 1
+                        
+                        shutil.move(str(file_path), str(target_path))
+                        processed += 1
+                        print(f"   ✓ Moved: {file_path.name} -> {folder_name}/")
+                        
+                    except Exception as e:
+                        print(f"   ✗ Error moving {file_path.name}: {e}")
+            else:
+                for file_path, reason in files:
+                    processed += 1
+                    print(f"   [DRY RUN] {file_path.name} -> {folder_name}/")
+        
+        # Summary
+        if not dry_run:
+            print(f"\n🎉 Organization Complete!")
+            print(f"📊 Files organized: {processed}/{total_files}")
+            print(f"📁 Categories created: {len(proposal)}")
+            print(f"📂 Files organized in: {organized_directory}")
+        else:
+            print(f"\n📋 Dry run complete - no files were moved")
+            print(f"📊 Would organize: {processed} files into {len(proposal)} categories")
+            print("Remove --dry-run flag to execute the organization")
 
 
 @click.command()
@@ -276,7 +334,9 @@ def main(directory, headless, dry_run):
     else:  # Headless mode
         print("\nHeadless mode: Proceeding automatically with organization...")
     
-    print("\nUser approval complete! Next: Implement file organization execution...")
+    # Execute the organization plan
+    print("\nExecuting intelligent content-based organization...")
+    organizer.execute_organization_plan(organization_proposal, dry_run=dry_run)
 
 if __name__ == "__main__":
     main()
