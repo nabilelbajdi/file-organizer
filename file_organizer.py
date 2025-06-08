@@ -17,7 +17,7 @@ import json
 import click
 import ollama
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 
 class FileContentAnalyzer:
@@ -142,6 +142,38 @@ class FileOrganizer:
             analysis_results[file_path] = self.analyzer.analyze_content_for_category(file_path)
                 
         return analysis_results
+    
+    def generate_organization_proposal(self, analysis_results: Dict[Path, Dict]) -> Dict[str, List[Tuple[Path, str]]]:
+        """Generate organization proposal based on content analysis"""
+        organization_proposal = {}
+        
+        for file_path, analysis in analysis_results.items():
+            category = analysis.get('category', 'Uncategorized')
+            subcategory = analysis.get('subcategory', '')
+            
+            # Create hierarchical folder structure
+            if subcategory and subcategory not in ['Unknown', 'Analysis Failed', 'Error']:
+                folder_structure = f"{category}/{subcategory}"
+            else:
+                folder_structure = category
+                
+            if folder_structure not in organization_proposal:
+                organization_proposal[folder_structure] = []
+                
+            organization_proposal[folder_structure].append((file_path, analysis.get('reason', '')))
+            
+        return organization_proposal
+    
+    def display_organization_proposal(self, proposal: Dict[str, List[Tuple[Path, str]]]):
+        """Display the proposed organization structure"""
+        print("\nProposed Organization Structure:")
+        print("Based on content analysis, the following organization is suggested:\n")
+        
+        for folder_name, files in proposal.items():
+            print(f"  📁 {folder_name}: {len(files)} files")
+            
+        print(f"\nTotal categories proposed: {len(proposal)}")
+        print(f"Total files to organize: {sum(len(files) for files in proposal.values())}")
 
 
 @click.command()
@@ -209,7 +241,14 @@ def main(directory, headless, dry_run):
         
         print(f"{rel_path:<25} {category:<18} {subcategory:<18} {confidence:<12}")
     
-    print("\nContent analysis complete! Next: Generate organization proposal...")
+    # Generate organization proposal based on content analysis
+    print("\nGenerating organization proposal based on content...")
+    organization_proposal = organizer.generate_organization_proposal(analysis_results)
+    
+    # Display the proposed organization
+    organizer.display_organization_proposal(organization_proposal)
+    
+    print("\nOrganization proposal complete! Next: Add interactive approval system...")
 
 if __name__ == "__main__":
     main()
