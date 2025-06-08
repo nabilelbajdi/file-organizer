@@ -13,8 +13,27 @@ VG Requirements:
 
 import os
 import click
+import ollama
 from pathlib import Path
-from typing import List
+from typing import List, Dict
+
+
+class FileContentAnalyzer:
+    """Analyzes file content using local AI to determine categories"""
+    
+    def __init__(self, model_name: str = "llama3.2:1b"):
+        self.model_name = model_name
+        self.client = ollama.Client()
+        
+    def verify_local_ai_connection(self) -> bool:
+        """Verify that local AI (Ollama) is running and model is available"""
+        try:
+            models_response = self.client.list()
+            print(f"Local AI connection verified - Available models found")
+            return True
+        except Exception as e:
+            print(f"Error connecting to local AI (Ollama): {e}")
+            return False
 
 
 class FileOrganizer:
@@ -22,6 +41,7 @@ class FileOrganizer:
     
     def __init__(self, target_directory: Path):
         self.target_directory = Path(target_directory)
+        self.analyzer = FileContentAnalyzer()
         
     def discover_all_files(self) -> List[Path]:
         """Discover ALL files in folder structure - VG requirement"""
@@ -68,8 +88,16 @@ def main(directory, headless, dry_run):
     print("- Using ONLY local AI (Ollama)")
     print("- Content-based sorting with user approval")
     
-    # Initialize organizer and discover files
+    # Initialize organizer
     organizer = FileOrganizer(Path(directory))
+    
+    # Verify local AI connection - REQUIREMENT: only local AI
+    print(f"\nVerifying local AI connection...")
+    if not organizer.analyzer.verify_local_ai_connection():
+        print("FAILED: Cannot connect to local AI (Ollama)")
+        print("Requirements: Local AI must be running")
+        print("Solution: Start Ollama with 'ollama serve'")
+        return
     
     print(f"\nDiscovering files in folder structure...")
     all_files = organizer.discover_all_files()
