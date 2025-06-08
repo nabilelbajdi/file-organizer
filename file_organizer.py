@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Intelligent File Organizer - VG Assignment
-Terminal program to organize files by content using local AI
+Intelligent File Organizer
+An AI-powered file organization tool that analyzes file content and automatically 
+suggests organization categories using local AI models.
 
-VG Requirements:
-- Go through folder structure and sort files by actual content
-- Unknown categories at start - program suggests organization
-- CLI flags for headless/interactive modes
-- User approval of sorting policy
-- Only local AI usage
+Features:
+- Content-based analysis (not just file extensions)
+- Local AI processing for privacy
+- Interactive and headless operation modes
+- Smart categorization with confidence scoring
+- Dry-run capability for safe testing
 """
 
 import os
@@ -111,7 +112,7 @@ class FileOrganizer:
         self.analyzer = FileContentAnalyzer()
         
     def discover_all_files(self) -> List[Path]:
-        """Discover ALL files in folder structure - VG requirement"""
+        """Discover all files in folder structure recursively"""
         discovered_files = []
         
         print(f"Scanning directory: {self.target_directory}")
@@ -150,7 +151,9 @@ class FileOrganizer:
 @click.option('--dry-run', is_flag=True, help='Show what would be done without moving files')
 def main(directory, headless, dry_run):
     """
-    Intelligent File Organizer - VG Assignment Implementation
+    Intelligent File Organizer
+    
+    Analyzes file content using local AI and organizes files into intelligent categories.
     
     DIRECTORY: Target directory to organize
     """
@@ -161,16 +164,16 @@ def main(directory, headless, dry_run):
     if dry_run:
         print("DRY RUN MODE - No files will be moved")
     
-    print("\nVG Assignment Requirements:")
-    print("- Analyzing ACTUAL file content (not extensions)")
-    print("- Unknown categories at start - AI determines organization") 
-    print("- Using ONLY local AI (Ollama)")
-    print("- Content-based sorting with user approval")
+    print("\nFeatures:")
+    print("- Content-based analysis (not just file extensions)")
+    print("- Dynamic category discovery using AI")
+    print("- Local AI processing for privacy")
+    print("- Smart organization with user approval")
     
     # Initialize organizer
     organizer = FileOrganizer(Path(directory))
     
-    # Verify local AI connection - REQUIREMENT: only local AI
+    # Verify local AI connection
     print(f"\nVerifying local AI connection...")
     if not organizer.analyzer.verify_local_ai_connection():
         print("FAILED: Cannot connect to local AI (Ollama)")
@@ -186,7 +189,7 @@ def main(directory, headless, dry_run):
         print("No files found to organize")
         return
         
-    # REQUIREMENT: Analyze actual content (unknown categories at start)
+    # Analyze actual content for intelligent categorization
     print(f"\nAnalyzing actual content of {len(all_files)} files...")
     print("Note: Categories are unknown at start - AI will determine organization")
     
