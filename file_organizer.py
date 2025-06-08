@@ -13,12 +13,27 @@ Features:
 """
 
 import os
-import json
 import shutil
+import json
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+import sys
+
 import click
 import ollama
-from pathlib import Path
-from typing import List, Dict, Tuple
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+from rich.prompt import Confirm
+
+try:
+    import magic
+    HAS_MAGIC = True
+except ImportError:
+    HAS_MAGIC = False
+    print("Warning: python-magic not available. File type detection will be limited.")
+
+console = Console()
 
 
 class FileContentAnalyzer:
@@ -32,24 +47,64 @@ class FileContentAnalyzer:
         """Verify that local AI (Ollama) is running and model is available"""
         try:
             models_response = self.client.list()
-            print(f"Local AI connection verified - Available models found")
+            
+            # Handle different response formats
+            if hasattr(models_response, 'models'):
+                available_models = [model.model for model in models_response.models]
+            elif isinstance(models_response, dict) and 'models' in models_response:
+                available_models = [model['name'] for model in models_response['models']]
+            else:
+                available_models = []
+                
+            if self.model_name not in available_models:
+                console.print(f"[yellow]Model {self.model_name} not found. Available models: {available_models}")
+                console.print(f"[blue]Attempting to pull {self.model_name}...")
+                self.client.pull(self.model_name)
             return True
         except Exception as e:
-            print(f"Error connecting to local AI (Ollama): {e}")
+            console.print(f"[red]Error connecting to local AI (Ollama): {e}")
             return False
     
     def extract_file_content(self, file_path: Path, max_chars: int = 2000) -> str:
         """Extract file content for AI analysis - actual content, not just extension"""
         try:
+            # Detect file type by content, not extension
+            if HAS_MAGIC:
+                file_type = magic.from_file(str(file_path), mime=True)
+            else:
+                # Fallback: basic extension-based detection
+                ext = file_path.suffix.lower()
+                if ext in ['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yml', '.yaml', '.csv']:
+                    file_type = 'text/plain'
+                elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']:
+                    file_type = 'image/jpeg'
+                elif ext in ['.mp4', '.avi', '.mov', '.mkv', '.wmv']:
+                    file_type = 'video/mp4'
+                elif ext in ['.mp3', '.wav', '.flac', '.ogg']:
+                    file_type = 'audio/mpeg'
+                elif ext == '.pdf':
+                    file_type = 'application/pdf'
+                else:
+                    file_type = 'application/octet-stream'
+            
             # Read actual content for text files
-            ext = file_path.suffix.lower()
-            if ext in ['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yml', '.yaml', '.csv']:
+            if file_type.startswith('text/') or file_type in ['application/json', 'application/xml']:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read(max_chars)
-                    return f"File type: {ext}\nActual content:\n{content}"
+                    return f"File type: {file_type}\nActual content:\n{content}"
+            
+            # Describe binary files by type and size
+            elif file_type.startswith('image/'):
+                return f"Image file: {file_type}, Size: {file_path.stat().st_size} bytes"
+            elif file_type.startswith('video/'):
+                return f"Video file: {file_type}, Size: {file_path.stat().st_size} bytes"
+            elif file_type.startswith('audio/'):
+                return f"Audio file: {file_type}, Size: {file_path.stat().st_size} bytes"
+            elif file_type == 'application/pdf':
+                return f"PDF document, Size: {file_path.stat().st_size} bytes"
             else:
-                # Describe binary files by type and size
-                return f"Binary file: {ext}, Size: {file_path.stat().st_size} bytes"
+                return f"Binary file: {file_type}, Size: {file_path.stat().st_size} bytes"
+                
         except Exception as e:
             return f"Error reading file content: {e}"
     
@@ -61,6 +116,7 @@ class FileContentAnalyzer:
         Analyze this file's ACTUAL CONTENT and suggest the best category for organization.
         
         File name: {file_path.name}
+        File location: {file_path}
         {content_info}
         
         Based on the ACTUAL CONTENT (not filename or extension), determine:
@@ -96,7 +152,7 @@ class FileContentAnalyzer:
                 }
                 
         except Exception as e:
-            print(f"Error analyzing content of {file_path}: {e}")
+            console.print(f"[red]Error analyzing content of {file_path}: {e}")
             return {
                 "category": "Uncategorized", 
                 "subcategory": "Error",
@@ -105,26 +161,26 @@ class FileContentAnalyzer:
             }
 
 
-class FileOrganizer:
-    """Main organizer class that implements file discovery"""
+class IntelligentFileOrganizer:
+    """Main organizer that implements VG requirements"""
     
-    def __init__(self, target_directory: Path):
+    def __init__(self, target_directory: Path, interactive_mode: bool = True):
         self.target_directory = Path(target_directory)
+        self.interactive_mode = interactive_mode
         self.analyzer = FileContentAnalyzer()
+        self.analysis_results = {}
         
     def discover_all_files(self) -> List[Path]:
-        """Discover all files in folder structure recursively"""
+        """Discover ALL files in folder structure - requirement: process all files"""
         discovered_files = []
         
-        print(f"Scanning directory: {self.target_directory}")
-        
         for root, dirs, filenames in os.walk(self.target_directory):
-            # Skip hidden directories
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            # Skip hidden directories and system directories
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules']]
             
             for filename in filenames:
-                # Skip hidden files
-                if filename.startswith('.'):
+                # Skip hidden files and system files
+                if filename.startswith('.') or filename in ['Thumbs.db', 'Desktop.ini']:
                     continue
                     
                 file_path = Path(root) / filename
@@ -136,11 +192,19 @@ class FileOrganizer:
         """Analyze actual content of all discovered files"""
         analysis_results = {}
         
-        print("Analyzing file content with local AI...")
+        console.print("[blue]Analyzing file content with local AI...[/blue]")
         
-        for i, file_path in enumerate(files, 1):
-            print(f"  Analyzing ({i}/{len(files)}): {file_path.name}")
-            analysis_results[file_path] = self.analyzer.analyze_content_for_category(file_path)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            task = progress.add_task("Content analysis in progress...", total=len(files))
+            
+            for file_path in files:
+                progress.update(task, description=f"Analyzing: {file_path.name}")
+                analysis_results[file_path] = self.analyzer.analyze_content_for_category(file_path)
+                progress.advance(task)
                 
         return analysis_results
     
@@ -165,33 +229,47 @@ class FileOrganizer:
             
         return organization_proposal
     
+    def display_analysis_summary(self, analysis_results: Dict[Path, Dict]):
+        """Display content analysis results"""
+        table = Table(title="Content Analysis Results")
+        table.add_column("File", style="cyan", min_width=20)
+        table.add_column("Detected Category", style="green", min_width=15)
+        table.add_column("Subcategory", style="blue", min_width=15)
+        table.add_column("Confidence", style="yellow", min_width=10)
+        table.add_column("Content-Based Reasoning", style="white", min_width=30)
+        
+        for file_path, analysis in analysis_results.items():
+            reason = analysis.get('reason', 'No explanation provided')
+            truncated_reason = reason[:47] + "..." if len(reason) > 50 else reason
+            
+            table.add_row(
+                str(file_path.relative_to(self.target_directory)),
+                analysis.get('category', 'Unknown'),
+                analysis.get('subcategory', 'Unknown'),
+                f"{analysis.get('confidence', 0)}%",
+                truncated_reason
+            )
+            
+        console.print(table)
+    
     def display_organization_proposal(self, proposal: Dict[str, List[Tuple[Path, str]]]):
         """Display the proposed organization structure"""
-        print("\nProposed Organization Structure:")
-        print("Based on content analysis, the following organization is suggested:\n")
+        console.print("\n[blue]Proposed Organization Structure:[/blue]")
+        console.print("Based on content analysis, the following organization is suggested:\n")
         
         for folder_name, files in proposal.items():
-            print(f"  {folder_name}: {len(files)} files")
+            console.print(f"  [bold blue]{folder_name}[/bold blue]: {len(files)} files")
             
-        print(f"\nTotal categories proposed: {len(proposal)}")
-        print(f"Total files to organize: {sum(len(files) for files in proposal.values())}")
+        console.print(f"\nTotal categories proposed: {len(proposal)}")
+        console.print(f"Total files to organize: {sum(len(files) for files in proposal.values())}")
     
-    def request_user_approval(self, proposal: Dict[str, List[Tuple[Path, str]]]) -> bool:
-        """Request user approval of the organization proposal"""
-        print("\n" + "="*60)
-        print("ORGANIZATION APPROVAL REQUIRED")
-        print("="*60)
-        print("The AI has analyzed file content and proposes the above organization structure.")
-        print("This will create new folders and move files based on their actual content.")
+    def request_sorting_policy_approval(self, proposal: Dict[str, List[Tuple[Path, str]]]) -> bool:
+        """Request user approval of the sorting policy"""
+        console.print("\n[yellow]SORTING POLICY APPROVAL REQUIRED[/yellow]")
+        console.print("The AI has analyzed file content and proposes the above organization structure.")
+        console.print("This will create new folders and move files based on their actual content.")
         
-        while True:
-            response = input("\nDo you approve this organization and want to proceed? (y/n): ").lower().strip()
-            if response in ['y', 'yes']:
-                return True
-            elif response in ['n', 'no']:
-                return False
-            else:
-                print("Please enter 'y' for yes or 'n' for no.")
+        return Confirm.ask("\nDo you approve this sorting policy and want to proceed with organization?")
     
     def execute_organization_plan(self, proposal: Dict[str, List[Tuple[Path, str]]], dry_run: bool = False):
         """Execute the approved organization plan"""
@@ -200,18 +278,13 @@ class FileOrganizer:
         if not dry_run:
             organized_directory.mkdir(exist_ok=True)
         
-        print(f"\n{'='*60}")
-        print(f"EXECUTING ORGANIZATION PLAN")
-        print(f"{'='*60}")
-        
-        total_files = sum(len(files) for files in proposal.values())
-        processed = 0
+        console.print("\n[green]Executing organization plan...[/green]")
         
         for folder_name, files in proposal.items():
             target_folder = organized_directory / folder_name
             
-            print(f"\nOrganizing: {folder_name}")
-            print(f"  Files to process: {len(files)}")
+            console.print(f"\n[bold blue]Organizing: {folder_name}[/bold blue]")
+            console.print(f"Files to process: {len(files)}")
             
             if not dry_run:
                 target_folder.mkdir(parents=True, exist_ok=True)
@@ -229,34 +302,24 @@ class FileOrganizer:
                             counter += 1
                         
                         shutil.move(str(file_path), str(target_path))
-                        processed += 1
-                        print(f"  Moved: {file_path.name} -> {folder_name}/")
+                        console.print(f"  [green]Moved[/green] {file_path.name} -> {folder_name}/")
                         
                     except Exception as e:
-                        print(f"  Error moving {file_path.name}: {e}")
+                        console.print(f"  [red]Error moving {file_path.name}: {e}[/red]")
             else:
                 for file_path, reason in files:
-                    processed += 1
-                    print(f"  [DRY RUN] {file_path.name} -> {folder_name}/")
-        
-        # Summary
-        if not dry_run:
-            print(f"\nOrganization Complete!")
-            print(f"Files organized: {processed}/{total_files}")
-            print(f"Categories created: {len(proposal)}")
-            print(f"Files organized in: {organized_directory}")
-        else:
-            print(f"\nDry run complete - no files were moved")
-            print(f"Would organize: {processed} files into {len(proposal)} categories")
-            print("Remove --dry-run flag to execute the organization")
+                    console.print(f"  [dry-run] {file_path.name} -> {folder_name}/")
 
 
 @click.command()
 @click.argument('directory', type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option('--headless', is_flag=True, default=False, 
               help='Headless mode: no user interaction, automatic execution')
+@click.option('--interactive', is_flag=True, default=True,
+              help='Interactive mode: user approval required (default)')
 @click.option('--dry-run', is_flag=True, help='Show what would be done without moving files')
-def main(directory, headless, dry_run):
+@click.option('--model', default='llama3.2:1b', help='Local AI model to use for content analysis')
+def main(directory, headless, interactive, dry_run, model):
     """
     Intelligent File Organizer
     
@@ -264,79 +327,93 @@ def main(directory, headless, dry_run):
     
     DIRECTORY: Target directory to organize
     """
-    print("Intelligent File Organizer - Content-Based Sorting")
-    print(f"Target directory: {directory}")
-    print(f"Mode: {'Headless (automatic execution)' if headless else 'Interactive (user approval required)'}")
+    
+    # Ensure only one mode is selected
+    if headless and interactive:
+        console.print("[red]Error: Cannot use both --headless and --interactive modes[/red]")
+        sys.exit(1)
+    
+    # Default to interactive if neither specified
+    mode = not headless
+    
+    console.print("[bold green]Intelligent File Organizer - Content-Based Sorting[/bold green]")
+    console.print(f"Target directory: {directory}")
+    console.print(f"Mode: {'Interactive (user approval required)' if mode else 'Headless (automatic execution)'}")
+    console.print(f"Local AI model: {model}")
     
     if dry_run:
-        print("DRY RUN MODE - No files will be moved")
+        console.print("[yellow]DRY RUN MODE - No files will be moved[/yellow]")
     
-    print("\nFeatures:")
-    print("- Content-based analysis (not just file extensions)")
-    print("- Dynamic category discovery using AI")
-    print("- Local AI processing for privacy")
-    print("- Smart organization with user approval")
+    console.print("\n[blue]Features:[/blue]")
+    console.print("- Content-based analysis (not just file extensions)")
+    console.print("- Dynamic category discovery using AI")
+    console.print("- Local AI processing for privacy")
+    console.print("- Smart organization with user approval")
     
     # Initialize organizer
-    organizer = FileOrganizer(Path(directory))
+    organizer = IntelligentFileOrganizer(Path(directory), interactive_mode=mode)
+    organizer.analyzer.model_name = model
     
     # Verify local AI connection
-    print(f"\nVerifying local AI connection...")
+    console.print("\n[blue]Verifying local AI connection...[/blue]")
     if not organizer.analyzer.verify_local_ai_connection():
-        print("FAILED: Cannot connect to local AI (Ollama)")
-        print("Requirements: Local AI must be running")
-        print("Solution: Start Ollama with 'ollama serve'")
-        return
+        console.print("[red]FAILED: Cannot connect to local AI (Ollama)[/red]")
+        console.print("[blue]Note: Local AI must be running[/blue]")
+        console.print("[blue]Solution: Start Ollama with 'ollama serve'[/blue]")
+        sys.exit(1)
     
-    print(f"\nDiscovering files in folder structure...")
+    console.print("[green]Local AI connection verified[/green]")
+    
+    # Discover all files in folder structure
+    console.print("\n[blue]Discovering all files in folder structure...[/blue]")
     all_files = organizer.discover_all_files()
-    print(f"Found {len(all_files)} files to analyze")
+    console.print(f"Found {len(all_files)} files to analyze")
     
     if not all_files:
-        print("No files found to organize")
+        console.print("[yellow]No files found to organize[/yellow]")
         return
-        
+    
     # Analyze actual content for intelligent categorization
-    print(f"\nAnalyzing actual content of {len(all_files)} files...")
-    print("Note: Categories are unknown at start - AI will determine organization")
+    console.print(f"\n[blue]Analyzing actual content of {len(all_files)} files...[/blue]")
+    console.print("[yellow]Note: Categories are unknown at start - AI will determine organization[/yellow]")
     
     analysis_results = organizer.analyze_all_content(all_files)
     
     # Display content analysis results
-    print("\nContent Analysis Complete!")
-    print(f"{'File':<25} {'Category':<18} {'Subcategory':<18} {'Confidence':<12}")
-    print("-" * 80)
-    
-    for file_path, analysis in analysis_results.items():
-        rel_path = str(file_path.relative_to(organizer.target_directory))
-        rel_path = rel_path[:22] + "..." if len(rel_path) > 25 else rel_path
-        category = analysis.get('category', 'Unknown')[:15]
-        subcategory = analysis.get('subcategory', 'Unknown')[:15] 
-        confidence = f"{analysis.get('confidence', 0)}%"
-        
-        print(f"{rel_path:<25} {category:<18} {subcategory:<18} {confidence:<12}")
+    console.print("\n[green]Content Analysis Complete![/green]")
+    organizer.display_analysis_summary(analysis_results)
     
     # Generate organization proposal based on content analysis
-    print("\nGenerating organization proposal based on content...")
+    console.print("\n[blue]Generating organization proposal based on content...[/blue]")
     organization_proposal = organizer.generate_organization_proposal(analysis_results)
     
     # Display the proposed organization
     organizer.display_organization_proposal(organization_proposal)
     
-    # Interactive mode - user approval required
+    # Interactive mode - user approval of sorting policy
     proceed = True
-    if not headless:  # Interactive mode
-        proceed = organizer.request_user_approval(organization_proposal)
+    if mode:  # Interactive mode
+        proceed = organizer.request_sorting_policy_approval(organization_proposal)
         if not proceed:
-            print("\nOrganization cancelled by user.")
-            print("No files were moved.")
+            console.print("[yellow]Organization cancelled by user[/yellow]")
             return
     else:  # Headless mode
-        print("\nHeadless mode: Proceeding automatically with organization...")
+        console.print("\n[blue]Headless mode: Proceeding automatically with organization[/blue]")
     
     # Execute the organization plan
-    print("\nExecuting intelligent content-based organization...")
+    console.print("\n[green]Executing content-based organization...[/green]")
     organizer.execute_organization_plan(organization_proposal, dry_run=dry_run)
+    
+    # Summary
+    if not dry_run:
+        console.print("\n[bold green]Organization Complete![/bold green]")
+        console.print(f"Files organized by content in: {Path(directory) / 'organized_by_content'}")
+        console.print(f"Categories created: {len(organization_proposal)}")
+        console.print(f"Files organized: {sum(len(files) for files in organization_proposal.values())}")
+    else:
+        console.print("\n[yellow]Dry run complete - no files were moved[/yellow]")
+        console.print("Remove --dry-run flag to execute the organization")
+
 
 if __name__ == "__main__":
     main()
