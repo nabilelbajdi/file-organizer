@@ -12,6 +12,7 @@ VG Requirements:
 """
 
 import os
+import json
 import click
 import ollama
 from pathlib import Path
@@ -34,6 +35,72 @@ class FileContentAnalyzer:
         except Exception as e:
             print(f"Error connecting to local AI (Ollama): {e}")
             return False
+    
+    def extract_file_content(self, file_path: Path, max_chars: int = 2000) -> str:
+        """Extract file content for AI analysis - actual content, not just extension"""
+        try:
+            # Read actual content for text files
+            ext = file_path.suffix.lower()
+            if ext in ['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yml', '.yaml', '.csv']:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read(max_chars)
+                    return f"File type: {ext}\nActual content:\n{content}"
+            else:
+                # Describe binary files by type and size
+                return f"Binary file: {ext}, Size: {file_path.stat().st_size} bytes"
+        except Exception as e:
+            return f"Error reading file content: {e}"
+    
+    def analyze_content_for_category(self, file_path: Path) -> Dict:
+        """Analyze actual file content to suggest category - not based on extension"""
+        content_info = self.extract_file_content(file_path)
+        
+        prompt = f"""
+        Analyze this file's ACTUAL CONTENT and suggest the best category for organization.
+        
+        File name: {file_path.name}
+        {content_info}
+        
+        Based on the ACTUAL CONTENT (not filename or extension), determine:
+        1. Main category (e.g., Work Documents, Personal Files, Code Projects, Media, etc.)
+        2. Subcategory if appropriate (e.g., Financial Reports, Python Scripts, Family Photos)
+        3. Confidence score (0-100) based on content analysis
+        4. Brief explanation of why this categorization fits the content
+        
+        Respond in JSON format only:
+        {{"category": "main_category", "subcategory": "sub_category", "confidence": 85, "reason": "explanation based on content analysis"}}
+        """
+        
+        try:
+            response = self.client.chat(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.3}
+            )
+            
+            response_text = response['message']['content']
+            
+            # Extract JSON from AI response
+            import re
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            else:
+                return {
+                    "category": "Uncategorized",
+                    "subcategory": "Analysis Failed",
+                    "confidence": 0,
+                    "reason": "Could not parse AI response"
+                }
+                
+        except Exception as e:
+            print(f"Error analyzing content of {file_path}: {e}")
+            return {
+                "category": "Uncategorized", 
+                "subcategory": "Error",
+                "confidence": 0,
+                "reason": f"Analysis failed: {e}"
+            }
 
 
 class FileOrganizer:
@@ -62,6 +129,18 @@ class FileOrganizer:
                 discovered_files.append(file_path)
                     
         return discovered_files
+    
+    def analyze_all_content(self, files: List[Path]) -> Dict[Path, Dict]:
+        """Analyze actual content of all discovered files"""
+        analysis_results = {}
+        
+        print("Analyzing file content with local AI...")
+        
+        for i, file_path in enumerate(files, 1):
+            print(f"  Analyzing ({i}/{len(files)}): {file_path.name}")
+            analysis_results[file_path] = self.analyzer.analyze_content_for_category(file_path)
+                
+        return analysis_results
 
 
 @click.command()
@@ -107,13 +186,27 @@ def main(directory, headless, dry_run):
         print("No files found to organize")
         return
         
-    # List discovered files
-    print("\nDiscovered files:")
-    for file_path in all_files:
-        rel_path = file_path.relative_to(organizer.target_directory)
-        print(f"  - {rel_path}")
+    # REQUIREMENT: Analyze actual content (unknown categories at start)
+    print(f"\nAnalyzing actual content of {len(all_files)} files...")
+    print("Note: Categories are unknown at start - AI will determine organization")
     
-    print("\nFile discovery complete! Next: Add content analysis...")
+    analysis_results = organizer.analyze_all_content(all_files)
+    
+    # Display content analysis results
+    print("\nContent Analysis Complete!")
+    print(f"{'File':<25} {'Category':<18} {'Subcategory':<18} {'Confidence':<12}")
+    print("-" * 80)
+    
+    for file_path, analysis in analysis_results.items():
+        rel_path = str(file_path.relative_to(organizer.target_directory))
+        rel_path = rel_path[:22] + "..." if len(rel_path) > 25 else rel_path
+        category = analysis.get('category', 'Unknown')[:15]
+        subcategory = analysis.get('subcategory', 'Unknown')[:15] 
+        confidence = f"{analysis.get('confidence', 0)}%"
+        
+        print(f"{rel_path:<25} {category:<18} {subcategory:<18} {confidence:<12}")
+    
+    print("\nContent analysis complete! Next: Generate organization proposal...")
 
 if __name__ == "__main__":
     main()
