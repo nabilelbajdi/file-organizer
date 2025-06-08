@@ -45,8 +45,11 @@ class FileOrganizer:
 
 
 @click.command()
-@click.argument('directory', type=click.Path(exists=True, file_okay=False, dir_okay=True))  
-def main(directory):
+@click.argument('directory', type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.option('--headless', is_flag=True, default=False, 
+              help='Headless mode: no user interaction, automatic execution')
+@click.option('--dry-run', is_flag=True, help='Show what would be done without moving files')
+def main(directory, headless, dry_run):
     """
     Intelligent File Organizer - VG Assignment Implementation
     
@@ -54,6 +57,11 @@ def main(directory):
     """
     print("Intelligent File Organizer - Content-Based Sorting")
     print(f"Target directory: {directory}")
+    print(f"Mode: {'Headless (automatic execution)' if headless else 'Interactive (user approval required)'}")
+    
+    if dry_run:
+        print("DRY RUN MODE - No files will be moved")
+    
     print("\nVG Assignment Requirements:")
     print("- Analyzing ACTUAL file content (not extensions)")
     print("- Unknown categories at start - AI determines organization") 
