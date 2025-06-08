@@ -174,6 +174,23 @@ class FileOrganizer:
             
         print(f"\nTotal categories proposed: {len(proposal)}")
         print(f"Total files to organize: {sum(len(files) for files in proposal.values())}")
+    
+    def request_user_approval(self, proposal: Dict[str, List[Tuple[Path, str]]]) -> bool:
+        """Request user approval of the organization proposal"""
+        print("\n" + "="*60)
+        print("ORGANIZATION APPROVAL REQUIRED")
+        print("="*60)
+        print("The AI has analyzed file content and proposes the above organization structure.")
+        print("This will create new folders and move files based on their actual content.")
+        
+        while True:
+            response = input("\nDo you approve this organization and want to proceed? (y/n): ").lower().strip()
+            if response in ['y', 'yes']:
+                return True
+            elif response in ['n', 'no']:
+                return False
+            else:
+                print("Please enter 'y' for yes or 'n' for no.")
 
 
 @click.command()
@@ -248,7 +265,18 @@ def main(directory, headless, dry_run):
     # Display the proposed organization
     organizer.display_organization_proposal(organization_proposal)
     
-    print("\nOrganization proposal complete! Next: Add interactive approval system...")
+    # Interactive mode - user approval required
+    proceed = True
+    if not headless:  # Interactive mode
+        proceed = organizer.request_user_approval(organization_proposal)
+        if not proceed:
+            print("\nOrganization cancelled by user.")
+            print("No files were moved.")
+            return
+    else:  # Headless mode
+        print("\nHeadless mode: Proceeding automatically with organization...")
+    
+    print("\nUser approval complete! Next: Implement file organization execution...")
 
 if __name__ == "__main__":
     main()
